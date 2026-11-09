@@ -1,2 +1,9 @@
 test_files/data_export/
 .venv/
+# secrets and local health data (never commit)
+.env
+data/
+.cache/
+__pycache__/
+*.pyc
+.changed.txt
