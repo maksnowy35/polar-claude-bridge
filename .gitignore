@@ -7,3 +7,10 @@ data/
 __pycache__/
 *.pyc
 .changed.txt
+
+# database tiers: only the READMEs are tracked outside public/
+database/private/*
+!database/private/README.md
+database/confidential/*
+!database/confidential/README.md
+*.db
