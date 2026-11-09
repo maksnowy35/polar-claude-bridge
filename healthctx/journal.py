@@ -79,7 +79,8 @@ def medical_current(med_dir, max_lines=25):
     p = os.path.join(med_dir or "", "timeline.md")
     if not med_dir or not os.path.exists(p):
         return None
-    lines = open(p, encoding="utf-8").read().splitlines()
+    with open(p, encoding="utf-8") as f:
+        lines = f.read().splitlines()
     out, on = [], False
     for ln in lines:
         if ln.startswith("## "):

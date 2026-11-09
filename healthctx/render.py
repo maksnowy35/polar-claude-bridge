@@ -1,6 +1,6 @@
-"""Render compact, Claude-friendly outputs.
+"""Context files written for the assistant (read status.md first, everything else on demand).
 
-out/
+context/
   INDEX.md                  what is where + legend (read first if unsure)
   status.md                 last 14 days + baselines + trends + flags + journal + medical pointer
   monthly.csv               one row per month (long-term trends)
@@ -12,41 +12,43 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
 from collections import defaultdict
 from datetime import datetime
 
 from .aggregate import baselines, week_loads, window_mean
+from .columns import DAILY_COLS, SESSION_COLS
 from .journal import fmt_entry, labs_flags, medical_current
-from .util import (BIN_MIN, coarsen, fmt_series, mean, min_to_hhmm, prev_day, rnd, s2d)
+from .util import BIN_MIN, coarsen, fmt_series, mean, prev_day, rnd, s2d
+
+logger = logging.getLogger(__name__)
 
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-DAILY_COLS = ["date", "on", "off", "sleep_h", "bed_h", "score", "s_dur", "s_sol", "s_reg", "deep_pct", "rem_pct",
-              "intr_min", "cont", "cycles", "charge", "nr", "ans", "hrv", "br", "hr_nr", "rhr", "hr_night",
-              "skin_t", "skin_dev", "steps", "kcal", "met_min", "mod_min", "vig_min", "sed_h", "nonwear_h",
-              "sess", "train_min", "load", "load7", "acwr", "sports", "last_end", "wt",
-              "mood", "energy", "stress", "alc", "caf_last", "sym", "supp", "flags"]
-
-SESSION_COLS = ["date", "start", "end", "sport", "dur_min", "kcal", "hr_avg", "hr_max", "hr_min", "zones_min",
-                "cardio_load", "cardio_int", "muscle_load", "trimp", "rpe", "recovery_h", "dist_km"]
 
 
 class Writer:
-    """Writes files only when content changed; remembers what changed (for the Drive uploader)."""
+    """Writes a file only when its content changed, so the uploader can send just the diff."""
 
     def __init__(self, root):
-        self.root, self.changed, self.total = root, [], 0
+        self.root, self.changed, self.total = str(root), [], 0
 
     def write(self, rel, text):
         p = os.path.join(self.root, rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         self.total += 1
-        if os.path.exists(p) and open(p, encoding="utf-8").read() == text:
-            return
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                if f.read() == text:
+                    return
         with open(p, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         self.changed.append(rel)
+
+    def save_changed_list(self):
+        with open(os.path.join(self.root, ".changed.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(self.changed))
 
 
 def _csv(rows, cols):
@@ -68,33 +70,40 @@ def _v(x, nd=None, unit=""):
 
 # ----------------------------------------------------------------------------- CSVs
 
-def render_csvs(W, rows, sessions):
-    by_m = defaultdict(list)
+def render_daily_csvs(W, rows, sessions):
+    rows_by_month = defaultdict(list)
     for r in rows:
-        by_m[r["date"][:7]].append(r)
-    for m, rs in by_m.items():
-        W.write(f"daily/daily_{m}.csv", _csv(rs, DAILY_COLS))
-    s_by_m = defaultdict(list)
+        rows_by_month[r["date"][:7]].append(r)
+    for month, month_rows in rows_by_month.items():
+        W.write(f"daily/daily_{month}.csv", _csv(month_rows, DAILY_COLS))
+
+    sessions_by_month = defaultdict(list)
     for s in sessions:
         s = dict(s)
         s["zones_min"] = "/".join(str(z or 0) for z in (s.get("zones") or []))
-        s_by_m[s["date"][:7]].append(s)
-    for m, ss in s_by_m.items():
-        W.write(f"sessions/sessions_{m}.csv", _csv(ss, SESSION_COLS))
-    # monthly
-    mrows = []
-    for m, rs in sorted(by_m.items()):
-        def mm(k, nd=1):
-            return rnd(mean([r.get(k) for r in rs]), nd)
-        mrows.append({"month": m, "days": len(rs), "sleep_h": mm("sleep_h", 2), "score": mm("score", 0),
-                      "deep_pct": mm("deep_pct", 0), "rem_pct": mm("rem_pct", 0), "hrv": mm("hrv", 0),
-                      "rhr": mm("rhr", 0), "br": mm("br"), "ans": mm("ans"), "skin_t": mm("skin_t", 2),
-                      "steps": mm("steps", 0), "sess": sum(r.get("sess") or 0 for r in rs),
-                      "train_h": rnd(sum(r.get("train_min") or 0 for r in rs) / 60, 1),
-                      "load": rnd(sum(r.get("load") or 0 for r in rs), 0),
-                      "mood": mm("mood"), "energy": mm("energy"), "stress": mm("stress"),
-                      "flag_days": sum(1 for r in rs if r.get("flags"))})
-    W.write("monthly.csv", _csv(mrows, list(mrows[0].keys()) if mrows else ["month"]))
+        sessions_by_month[s["date"][:7]].append(s)
+    for month, month_sessions in sessions_by_month.items():
+        W.write(f"sessions/sessions_{month}.csv", _csv(month_sessions, SESSION_COLS))
+
+
+def render_monthly(W, rows):
+    rows_by_month = defaultdict(list)
+    for r in rows:
+        rows_by_month[r["date"][:7]].append(r)
+
+    monthly = []
+    for month, rs in sorted(rows_by_month.items()):
+        def avg(key, nd=1):
+            return rnd(mean([r.get(key) for r in rs]), nd)
+        monthly.append({"month": month, "days": len(rs), "sleep_h": avg("sleep_h", 2), "score": avg("score", 0),
+                        "deep_pct": avg("deep_pct", 0), "rem_pct": avg("rem_pct", 0), "hrv": avg("hrv", 0),
+                        "rhr": avg("rhr", 0), "br": avg("br"), "ans": avg("ans"), "skin_t": avg("skin_t", 2),
+                        "steps": avg("steps", 0), "sess": sum(r.get("sess") or 0 for r in rs),
+                        "train_h": rnd(sum(r.get("train_min") or 0 for r in rs) / 60, 1),
+                        "load": rnd(sum(r.get("load") or 0 for r in rs), 0),
+                        "mood": avg("mood"), "energy": avg("energy"), "stress": avg("stress"),
+                        "flag_days": sum(1 for r in rs if r.get("flags"))})
+    W.write("monthly.csv", _csv(monthly, list(monthly[0].keys()) if monthly else ["month"]))
 
 
 # ----------------------------------------------------------------------------- day drill-down
@@ -213,7 +222,8 @@ def _arrow(a, b, tol):
     return "↑" if a - b > tol else "↓" if b - a > tol else "→"
 
 
-def render_status(W, rows, profile, coverage, journal_rows, med_dir, end_date, generated):
+def render_status(W, rows, profile, coverage, journal_rows, med_dir, end_date):
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     rows_end = [r for r in rows if r["date"] <= end_date]
     last14 = rows_end[-14:]
     B = baselines(rows_end, end_date, 60)
@@ -335,13 +345,13 @@ def _journal_lines(jr):
     return out
 
 
-def render_index(W, coverage, generated, n_days, end_date):
-    txt = f"""# claude_health — INDEX (generated {generated}, data through {end_date})
+def render_index(W, coverage, n_days, end_date):
+    txt = f"""# Health context — INDEX (data through {end_date})
 
 Read order for any health question: status.md first (≈2–3k tokens). Then only what the question needs:
 - "why did I sleep badly / why score X" → days/day_<today>.md (night + evening before) and, if needed, day_<yesterday>.md
 - "symptom today (sore throat, fatigue)" → status.md flags + days/day_<today>.md + daily/daily_<month>.csv (last 7–14 rows)
-- "mood/energy worse for N days" → status.md, daily CSV for the period, sessions CSV, medical/timeline.md, medical/labs.csv
+- "mood/energy worse for N days" → status.md, daily CSV for the period, sessions CSV, medical timeline and labs
 - long-term trends → monthly.csv
 - one training in detail → sessions/sessions_<month>.csv, then the day file (HR 5-min profile)
 
@@ -351,9 +361,9 @@ Files
 - sessions/sessions_YYYY-MM.csv — 1 row/training: zones_min = minutes in HR zones Z1/Z2/Z3/Z4/Z5
 - days/day_YYYY-MM-DD.md — drill-down ({n_days} days)
 - monthly.csv — monthly means/sums
-- journal/log.csv — manual log: date,time,type,item,value,unit,note (type: supp, med, symptom, mood, energy, stress, alcohol, caffeine, illness, rpe, weight, note)
-- medical/timeline.md (section "## Aktualnie" = current meds/diagnoses, copied into status.md), medical/labs.csv (date,test,value,unit,ref_low,ref_high,note)
-- raw/ — untouched Polar exports / API JSON (do not read unless debugging)
+- journal: table journal_entries (day, entry_time, entry_type, item, value, unit, note); types: supp, med, symptom, mood, energy, stress, alcohol, caffeine, illness, rpe, weight, note
+- medical: timeline.md (section "## Aktualnie" is copied into status.md) and labs.csv, kept outside this folder
+- database: daily_metrics, training_sessions, journal_entries; views v_daily_last_30, v_flagged_days, v_monthly
 
 Conventions
 - Night metrics (sleep, Nightly Recharge, RHR, night skin temp) belong to the date of waking up.
