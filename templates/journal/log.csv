@@ -1,0 +1,9 @@
+date,time,type,item,value,unit,note
+2026-10-16,08:00,mood,,6,,
+2026-10-16,08:00,energy,,5,,
+2026-10-16,08:05,med,(nazwa leku),10,mg,
+2026-10-16,21:30,supp,magnez,400,mg,
+2026-10-16,15:00,caffeine,kawa,150,mg,
+2026-10-16,20:00,alcohol,piwo,1,,
+2026-10-17,08:00,symptom,ból gardła,2,,po basenie
+2026-10-16,19:00,rpe,tenis 18:00,8,,mocny sparing
