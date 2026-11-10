@@ -1,64 +1,80 @@
-# claude_health
+# polar-claude-bridge
 
-Silnik danych zdrowotnych dla Claude. Zamienia surowe dane z Polara (eksport z Polar Flow **i** odpowiedzi AccessLink API v3) w mały zestaw plików, które Claude czyta zamiast surowych JSON-ów. Tylko biblioteka standardowa Pythona (3.10+), bez instalacji pakietów.
+Pipeline, który zamienia dane z zegarka Polar (eksport z Polar Flow i AccessLink API v3), dziennik i wyniki badań w bazę danych oraz mały zestaw plików kontekstu dla asystenta AI. Asystent czyta `status.md` (~1,5k tokenów) albo widok SQL zamiast surowych JSON-ów, których jest kilkaset MB na rok.
+
+## Architektura
+
+```
+ Polar Flow export ─┐
+ AccessLink API ────┼─► raw JSON ──► parsers ──► facts ──► aggregate ──► daily_metrics ──► context files
+ journal CSV / SQL ─┘   (Drive)      (export,     (DB)      (baselines,    training_sessions   (status.md,
+                                      api)                   flags)        (DB)                 days/, CSV)
+```
+
+- **Import** jest idempotentny: plik z tym samym sha1 nie jest parsowany drugi raz, a fakt z niezmienionym payloadem nie oznacza dnia jako zmienionego.
+- **Build** jest przyrostowy: przelicza dni od pierwszego zmienionego, a z wcześniejszych bierze tylko historię potrzebną do linii bazowych (28 i 60 dni).
+- **Baza:** Postgres na Neon w produkcji, SQLite lokalnie i w testach. Ten sam kod, różnią się tylko migracje. Uzasadnienie jest w [docs/adr/001-database.md](docs/adr/001-database.md).
 
 ## Struktura repo
 
 | ścieżka | co to |
 |---|---|
-| `healthctx/` | parsery (`parsers/export.py`, `parsers/api.py`), agregacja z flagami, dziennik, renderowanie plików |
-| `run.py` | CLI: surowe dane → pliki kontekstu |
-| `tests/` | testy parserów i generator syntetycznych danych API |
-| `templates/` | wzory `journal/log.csv`, `medical/timeline.md`, `medical/labs.csv` |
-| `test_files/` | lokalny serwer MCP (`polar_mcp_server.py`) i autoryzacja OAuth (`auth_script.py`) |
-| `.env.example` | zmienne na klucze Polara i folder Dysku; prawdziwe wartości tylko w `.env` |
+| `healthctx/parsers/` | rozpoznawanie i parsowanie plików eksportu i odpowiedzi API (po zawartości, nie po nazwie) |
+| `healthctx/aggregate.py` | rekordy dzienne, linie bazowe, flagi |
+| `healthctx/db.py`, `repository.py`, `migrations/` | dostęp do bazy (SQLite/Postgres) i schemat |
+| `healthctx/pipeline.py`, `cli.py` | import, build, CLI |
+| `healthctx/render.py` | pliki kontekstu |
+| `database/` | dane podzielone na `public/`, `private/` i `confidential/`, patrz [database/README.md](database/README.md) |
+| `tests/` | testy jednostkowe, test całego pipeline'u (SQLite, opcjonalnie Postgres), generator danych syntetycznych |
+| `templates/` | wzory dziennika i plików medycznych |
+| `test_files/` | lokalny serwer MCP i autoryzacja OAuth Polara |
 
 ## Uruchomienie
 
 ```bash
-python run.py --raw data/raw --out data/out \
-              --journal data/journal/log.csv --medical data/medical
-python tests/test_parsers.py          # szybki test parserów
-python tests/make_fixtures.py /tmp/fx # syntetyczne dane API do testu całości
+pip install -r requirements.txt
+cp .env.example .env                  # DATABASE_URL puste = lokalny SQLite w database/private/health.db
+python -m healthctx run               # migrate + import + build
+python -m healthctx build --full      # przeliczenie wszystkiego od zera
+python -m unittest discover -s tests -t .
 ```
 
-`--raw` może zawierać dowolne podfoldery i nazwy plików. Typ danych jest rozpoznawany po zawartości, a nie po nazwie. Wyniki parsowania są cache'owane per plik (`<out>/.cache`), więc codzienny przebieg parsuje tylko nowe pliki. `<out>/.changed.txt` zawiera listę plików, które się zmieniły (do wysyłki na Dysk).
+Test na Postgresie uruchamia się tylko z `TEST_DATABASE_URL`, a nazwa bazy musi zawierać `test`, bo test czyści schemat.
 
-## Co powstaje
+## Pliki kontekstu (`database/private/context/`)
 
 | plik | rozmiar | do czego |
 |---|---|---|
-| `status.md` | ~1–1,5k tokenów | czytany zawsze pierwszy: profil, linie bazowe z 60 dni, trend 7 vs 28 dni, tabela 14 dni, obciążenie tygodniowe, flagi, dziennik, leki |
-| `days/day_RRRR-MM-DD.md` | ~0,5k | szczegóły dnia: hipnogram, HR/HRV/oddech w nocy, temp. skóry, wieczór przed snem, treningi z profilem HR co 5 min |
-| `daily/daily_RRRR-MM.csv` | ~0,8k/mies. | 1 wiersz na dzień |
-| `sessions/sessions_RRRR-MM.csv` | ~0,3k/mies. | 1 wiersz na trening (minuty w strefach, cardio load) |
-| `monthly.csv` | <0,1k/mies. | trendy długoterminowe |
-| `INDEX.md` | ~1k | legenda kolumn, flag i kolejność czytania |
+| `status.md` | ~1–1,5k tokenów | zawsze pierwszy: profil, linie bazowe z 60 dni, trend 7 vs 28 dni, ostatnie 14 dni, obciążenie, flagi, dziennik, leki |
+| `days/day_RRRR-MM-DD.md` | ~0,5k | noc (hipnogram, HR, HRV, oddech, temp. skóry), wieczór przed snem, treningi z HR co 5 min |
+| `daily/`, `sessions/` | ~0,8k / ~0,3k na miesiąc | 1 wiersz na dzień / na trening |
+| `monthly.csv`, `INDEX.md` | małe | trendy długoterminowe, legenda kolumn i flag |
+
+`.changed.txt` zawiera listę plików zmienionych w ostatnim buildzie, czyli to, co trzeba wysłać na Dysk.
 
 ## Obsługiwane dane
 
 | źródło | eksport Flow | API v3 |
 |---|---|---|
-| aktywność dzienna (kroki, MET, poziomy) | `activity-*.json` ✔ | `/v3/users/activities` ✔ |
-| tętno 24/7 | `247ohr_*.json` ✔ | `/v3/users/continuous-heart-rate` ✔ |
-| temperatura skóry | `generic-period` (TM_SKIN_TEMPERATURE) ✔ | biosensing: parser tolerancyjny |
-| treningi | `training-session*.json` ✔ | `/v3/exercises` (z `samples`, `zones`) ✔ |
-| sen (fazy, wynik, hipnogram) | **brak próbki** (na razie tylko czas snu z pliku aktywności) | `/v3/users/sleep` ✔ |
-| Nightly Recharge (ANS, HRV, oddech) | **brak próbki** | `/v3/users/nightly-recharge` ✔ |
-| cardio load (status, strain, tolerance) | — | `/v3/users/cardio-load` ✔ |
-| profil, progi HR, test fitness | ✔ (bez imienia i e-maila) | — |
+| aktywność dzienna | `activity-*.json` | `/v3/users/activities` |
+| tętno 24/7 | `247ohr_*.json` | `/v3/users/continuous-heart-rate` |
+| temperatura skóry | `generic-period` (TM_SKIN_TEMPERATURE) | biosensing (parser tolerancyjny) |
+| treningi | `training-session*.json` | `/v3/exercises` z `samples` i `zones` |
+| sen | tylko czas snu z pliku aktywności (brak próbki pliku snu) | `/v3/users/sleep` |
+| Nightly Recharge | brak próbki | `/v3/users/nightly-recharge` |
+| cardio load | — | `/v3/users/cardio-load` |
 
-Parsery API są napisane według dokumentacji AccessLink i przetestowane na danych syntetycznych, nie na Twoich.
+Parsery API są napisane według dokumentacji AccessLink i sprawdzone na danych syntetycznych.
 
-## Dziennik (`journal/log.csv`)
+## Dziennik
 
-`date,time,type,item,value,unit,note`. Typy: `supp, med, symptom, mood, energy, stress, alcohol, caffeine, illness, rpe, weight, note`. Nastrój, energia i stres w skali 1–10. Wzór jest w `templates/journal/log.csv`.
+Tabela `journal_entries` jest źródłem prawdy: wpisy można dodawać SQL-em albo importować z `database/confidential/journal/log.csv` (`date,time,type,item,value,unit,note`). Typy: `supp, med, symptom, mood, energy, stress, alcohol, caffeine, illness, rpe, weight, note`. Skala nastroju, energii i stresu to 1–10.
 
 ## Konfiguracja
 
-`sports.json` mapuje numer sportu z eksportu na nazwę, np. `"204": "tenis"`. Progi flag są w `healthctx/aggregate.py`.
+Zmienne środowiskowe są w `.env.example`. `sports.json` mapuje numer sportu z eksportu na nazwę, a progi flag są w `healthctx/aggregate.py`.
 
 ## Zasady
 
 - Noc (sen, Nightly Recharge, tętno spoczynkowe, temp. skóry) należy do daty przebudzenia.
-- Do repozytorium trafia tylko kod. `data/`, `.cache/` i `.env` są w `.gitignore`.
+- Repo jest publiczne: w gicie jest tylko kod i dane syntetyczne. Klucze trzymam w `.env` i GitHub Secrets.
