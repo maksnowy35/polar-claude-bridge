@@ -78,3 +78,4 @@ Zmienne środowiskowe są w `.env.example`. `sports.json` mapuje numer sportu z 
 
 - Noc (sen, Nightly Recharge, tętno spoczynkowe, temp. skóry) należy do daty przebudzenia.
 - Repo jest publiczne: w gicie jest tylko kod i dane syntetyczne. Klucze trzymam w `.env` i GitHub Secrets.
+- Po sklonowaniu włącz hook: `git config core.hooksPath .githooks`. Strażnik (`tools/check_sensitive.py`) blokuje commit z plikami z `database/private` i `database/confidential`, `.env`, plikami bazy, JSON-ami Polara poza `database/public` i `tests/` oraz kluczami wpisanymi w kod. `python tools/check_sensitive.py --all` sprawdza całe repo.

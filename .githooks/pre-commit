@@ -1,0 +1,4 @@
+#!/bin/sh
+# Enable once per clone: git config core.hooksPath .githooks
+if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+exec "$PY" tools/check_sensitive.py
