@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .config import Settings
 from .db import Database
+from .db_check import check_database, log_report
 from .pipeline import build_context, import_journal_csv, import_raw_files
 
 logger = logging.getLogger("healthctx")
@@ -16,6 +17,7 @@ def _parser():
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("migrate", help="create or update the database schema")
+    sub.add_parser("db-check", help="connection, schema version and row counts (no health values)")
 
     imp = sub.add_parser("import", help="import raw Polar JSON and the journal CSV")
     imp.add_argument("--raw", type=Path, help="raw data folder (default from settings)")
@@ -42,8 +44,16 @@ def main(argv=None):
     if getattr(args, "out", None):
         settings.context_dir = args.out
 
-    db = Database(settings.database_url)
     try:
+        db = Database(settings.database_url)
+    except Exception as exc:
+        # psycopg puts host and user in the message, but never the password
+        logger.error("cannot connect to the database: %s", exc)
+        return 1
+
+    try:
+        if args.command == "db-check":
+            return 0 if log_report(check_database(db)) else 1
         if args.command in ("migrate", "run"):
             db.migrate()
         if args.command in ("import", "run"):

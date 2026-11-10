@@ -41,6 +41,22 @@ python -m unittest discover -s tests -t .
 
 Test na Postgresie uruchamia się tylko z `TEST_DATABASE_URL`, a nazwa bazy musi zawierać `test`, bo test czyści schemat.
 
+## Neon: konfiguracja
+
+1. Na neon.tech załóż projekt w regionie **AWS Europe Central (Frankfurt)**.
+2. Skopiuj connection string **bez** `-pooler` w nazwie hosta. psycopg używa prepared statements, a pooler Neona działa w trybie transakcyjnym PgBouncera, który ich nie obsługuje.
+3. Wpisz go do `.env`:
+   ```
+   DATABASE_URL=postgresql://<user>:<password>@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
+   ```
+4. Uruchom:
+   ```bash
+   python -m healthctx migrate
+   python -m healthctx db-check     # host, wersja schematu, liczba wierszy; bez wartości zdrowotnych
+   ```
+5. Na GitHubie: Settings → Secrets and variables → Actions → `DATABASE_URL`.
+6. Opcjonalnie podłącz konektor Neon w claude.ai. Wtedy asystent czyta widoki `v_daily_last_30`, `v_flagged_days` i `v_monthly` oraz dopisuje do `journal_entries`.
+
 ## Pliki kontekstu (`database/private/context/`)
 
 | plik | rozmiar | do czego |

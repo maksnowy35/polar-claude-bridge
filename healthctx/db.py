@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,14 @@ class Database:
         else:
             raise ValueError(f"Unsupported DATABASE_URL scheme: {url.split(':', 1)[0]}")
         logger.debug("connected to %s database", self.dialect)
+
+    def describe(self):
+        """Where we are connected, without the password."""
+        if self.dialect == "sqlite":
+            return f"sqlite {self.url.removeprefix('sqlite:///')}"
+        parsed = urlparse(self.url)
+        host = parsed.hostname or parse_qs(parsed.query).get("host", ["localhost"])[0]
+        return f"postgres {host}/{parsed.path.lstrip('/')}"
 
     def _sql(self, query):
         if self.dialect == "postgres":
