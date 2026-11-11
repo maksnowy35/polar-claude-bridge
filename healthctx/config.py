@@ -26,6 +26,7 @@ class Settings:
     journal_csv: Path
     medical_dir: Path
     sports_file: Path
+    polar_access_token: str = ""
 
     @classmethod
     def from_env(cls):
@@ -39,4 +40,5 @@ class Settings:
             journal_csv=Path(_env("HEALTH_JOURNAL_CSV", confidential / "journal" / "log.csv")),
             medical_dir=Path(_env("HEALTH_MEDICAL_DIR", confidential / "medical")),
             sports_file=Path(_env("HEALTH_SPORTS_FILE", REPO_ROOT / "sports.json")),
+            polar_access_token=_env("POLAR_ACCESS_TOKEN", ""),
         )

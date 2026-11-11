@@ -34,12 +34,15 @@ Pipeline, który zamienia dane z zegarka Polar (eksport z Polar Flow i AccessLin
 ```bash
 pip install -r requirements.txt
 cp .env.example .env                  # DATABASE_URL puste = lokalny SQLite w database/private/health.db
-python -m healthctx run               # migrate + import + build
+python -m healthctx run               # fetch (jeśli jest POLAR_ACCESS_TOKEN) + migrate + import + build
+python -m healthctx fetch --days 7    # tylko pobranie z AccessLink do database/private/raw/api/
 python -m healthctx build --full      # przeliczenie wszystkiego od zera
 python -m unittest discover -s tests -t .
 ```
 
 Test na Postgresie uruchamia się tylko z `TEST_DATABASE_URL`, a nazwa bazy musi zawierać `test`, bo test czyści schemat.
+
+Fetch zapisuje każdy element (noc, trening, dzień aktywności) jako osobny plik z datą w nazwie. Ponowne uruchomienie nadpisuje te same pliki, a import pomija niezmienione. Zakres dat dla aktywności i tętna 24/7 jest ograniczony do 28 dni, bo tyle przyjmuje AccessLink. Nieudany fetch (np. 401 po odebraniu zgody) nie zatrzymuje buildu z danych, które już są, tylko kończy `run` kodem 1.
 
 ## Neon: konfiguracja
 

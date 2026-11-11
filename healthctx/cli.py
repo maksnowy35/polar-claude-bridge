@@ -3,9 +3,12 @@ import logging
 import sys
 from pathlib import Path
 
+import requests
+
 from .config import Settings
 from .db import Database
 from .db_check import check_database, log_report
+from .fetch_polar import PolarApiError, PolarClient, fetch_all
 from .pipeline import build_context, import_journal_csv, import_raw_files
 
 logger = logging.getLogger("healthctx")
@@ -19,6 +22,9 @@ def _parser():
     sub.add_parser("migrate", help="create or update the database schema")
     sub.add_parser("db-check", help="connection, schema version and row counts (no health values)")
 
+    fetch = sub.add_parser("fetch", help="download recent data from Polar AccessLink into raw/api")
+    fetch.add_argument("--days", type=int, default=7, help="days back for range endpoints (max 28)")
+
     imp = sub.add_parser("import", help="import raw Polar JSON and the journal CSV")
     imp.add_argument("--raw", type=Path, help="raw data folder (default from settings)")
     imp.add_argument("--journal", type=Path, help="journal CSV to upsert")
@@ -28,9 +34,20 @@ def _parser():
     build.add_argument("--end", help="last date shown in status.md (YYYY-MM-DD)")
     build.add_argument("--out", type=Path, help="context output folder")
 
-    run = sub.add_parser("run", help="migrate + import + build")
+    run = sub.add_parser("run", help="fetch (if POLAR_ACCESS_TOKEN is set) + migrate + import + build")
     run.add_argument("--full", action="store_true")
+    run.add_argument("--days", type=int, default=7)
     return parser
+
+
+def _fetch(settings, days):
+    # A failed fetch must not block building from the data we already have, so report and go on.
+    try:
+        fetch_all(PolarClient(settings.polar_access_token), settings.raw_dir / "api", days=days)
+    except (PolarApiError, requests.RequestException) as exc:
+        logger.error("fetch failed: %s", exc)
+        return False
+    return True
 
 
 def main(argv=None):
@@ -43,6 +60,16 @@ def main(argv=None):
     settings = Settings.from_env()
     if getattr(args, "out", None):
         settings.context_dir = args.out
+
+    if args.command == "fetch":
+        return 0 if _fetch(settings, args.days) else 1
+
+    fetch_ok = True
+    if args.command == "run":
+        if settings.polar_access_token:
+            fetch_ok = _fetch(settings, args.days)
+        else:
+            logger.info("POLAR_ACCESS_TOKEN not set, skipping fetch")
 
     try:
         db = Database(settings.database_url)
@@ -66,7 +93,7 @@ def main(argv=None):
         return 1
     finally:
         db.close()
-    return 0
+    return 0 if fetch_ok else 1
 
 
 if __name__ == "__main__":
