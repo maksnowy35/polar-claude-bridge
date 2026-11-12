@@ -36,6 +36,8 @@ pip install -r requirements.txt
 cp .env.example .env                  # DATABASE_URL puste = lokalny SQLite w database/private/health.db
 python -m healthctx run               # fetch (jeśli jest POLAR_ACCESS_TOKEN) + migrate + import + build
 python -m healthctx fetch --days 7    # tylko pobranie z AccessLink do database/private/raw/api/
+python -m healthctx push-context      # zmienione pliki kontekstu na Dysk Google
+python -m healthctx pull-raw --with-confidential   # odtworzenie archiwum z Dysku (np. na runnerze CI)
 python -m healthctx build --full      # przeliczenie wszystkiego od zera
 python -m unittest discover -s tests -t .
 ```
@@ -59,6 +61,17 @@ Fetch zapisuje każdy element (noc, trening, dzień aktywności) jako osobny pli
    ```
 5. Na GitHubie: Settings → Secrets and variables → Actions → `DATABASE_URL`.
 6. Opcjonalnie podłącz konektor Neon w claude.ai. Wtedy asystent czyta widoki `v_daily_last_30`, `v_flagged_days` i `v_monthly` oraz dopisuje do `journal_entries`.
+
+## Google Drive: konfiguracja
+
+1. W Google Cloud Console załóż projekt i włącz **Google Drive API**.
+2. Na ekranie zgody OAuth wybierz typ External, dodaj scope `https://www.googleapis.com/auth/drive.file`, a potem **opublikuj aplikację** (status „In production”). W trybie Testing refresh token wygasa po 7 dniach. `drive.file` nie wymaga weryfikacji przez Google.
+3. W Credentials utwórz OAuth client ID typu **Web application** z redirect URI `https://developers.google.com/oauthplayground`. Client ID i secret wpisz do `.env`.
+4. Refresh token: w [OAuth 2.0 Playground](https://developers.google.com/oauthplayground) włącz „Use your own OAuth credentials”, autoryzuj scope `drive.file`, kliknij „Exchange authorization code for tokens” i skopiuj refresh token do `GDRIVE_REFRESH_TOKEN`.
+5. `python -m healthctx push-context --dry-run`, a potem bez `--dry-run`. Przy pierwszym prawdziwym uruchomieniu na Moim dysku powstaje folder `polar-claude-bridge`, a jego id pojawia się w logu. Wpisz je do `GDRIVE_FOLDER_ID`.
+6. Te same cztery zmienne dodaj w GitHub Secrets.
+
+Ze scope `drive.file` aplikacja widzi tylko pliki, które sama utworzyła, więc nie ma dostępu do reszty Dysku. Konektor Drive w claude.ai działa na Twoim koncie, więc czyta te pliki normalnie.
 
 ## Pliki kontekstu (`database/private/context/`)
 

@@ -17,6 +17,9 @@ class CliTest(unittest.TestCase):
             "HEALTH_CONTEXT_DIR": str(self.tmp / "context"),
             "HEALTH_JOURNAL_CSV": str(self.tmp / "missing.csv"),
             "POLAR_ACCESS_TOKEN": "",
+            "GDRIVE_CLIENT_ID": "",
+            "GDRIVE_CLIENT_SECRET": "",
+            "GDRIVE_REFRESH_TOKEN": "",
         }
 
     def tearDown(self):
@@ -30,6 +33,12 @@ class CliTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.env), self.assertLogs("healthctx", level="INFO") as logs:
             self.assertEqual(main(["run"]), 0)
         self.assertTrue(any("skipping fetch" in line for line in logs.output))
+
+    def test_drive_commands_without_credentials_fail_cleanly(self):
+        for command in (["push-context"], ["push-raw", "--dry-run"], ["pull-raw", "--with-confidential"]):
+            with self.subTest(command=command), mock.patch.dict(os.environ, self.env), \
+                    self.assertLogs("healthctx", level="ERROR"):
+                self.assertEqual(main(command), 1)
 
 
 if __name__ == "__main__":

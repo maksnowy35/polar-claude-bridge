@@ -27,6 +27,11 @@ class Settings:
     medical_dir: Path
     sports_file: Path
     polar_access_token: str = ""
+    confidential_dir: Path | None = None
+    gdrive_folder_id: str = ""
+    gdrive_client_id: str = ""
+    gdrive_client_secret: str = ""
+    gdrive_refresh_token: str = ""
 
     @classmethod
     def from_env(cls):
@@ -41,4 +46,9 @@ class Settings:
             medical_dir=Path(_env("HEALTH_MEDICAL_DIR", confidential / "medical")),
             sports_file=Path(_env("HEALTH_SPORTS_FILE", REPO_ROOT / "sports.json")),
             polar_access_token=_env("POLAR_ACCESS_TOKEN", ""),
+            confidential_dir=confidential,
+            gdrive_folder_id=_env("GDRIVE_FOLDER_ID", ""),
+            gdrive_client_id=_env("GDRIVE_CLIENT_ID", ""),
+            gdrive_client_secret=_env("GDRIVE_CLIENT_SECRET", ""),
+            gdrive_refresh_token=_env("GDRIVE_REFRESH_TOKEN", ""),
         )
