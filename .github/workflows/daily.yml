@@ -1,0 +1,73 @@
+name: daily
+
+on:
+  schedule:
+    # GitHub cron is UTC only: 05:30 UTC = 06:30 in Warsaw in winter, 07:30 in summer
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-pipeline
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POLAR_ACCESS_TOKEN: ${{ secrets.POLAR_ACCESS_TOKEN }}
+      GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+      GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+      GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+      GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+    steps:
+      # Without secrets (fresh fork, not configured yet) the job ends green with a notice
+      # instead of failing every morning.
+      - name: Check secrets
+        id: secrets
+        run: |
+          missing=""
+          for name in DATABASE_URL POLAR_ACCESS_TOKEN GDRIVE_FOLDER_ID GDRIVE_CLIENT_ID GDRIVE_CLIENT_SECRET GDRIVE_REFRESH_TOKEN; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice::Pipeline skipped, missing secrets:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        if: steps.secrets.outputs.ready == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Restore archive from Drive
+        if: steps.secrets.outputs.ready == 'true'
+        run: python -m healthctx pull-raw --with-confidential
+
+      # The CLI logs only counts, dates and file names. Logs of a public repo are public,
+      # so never add steps that print context files or query results.
+      - name: Fetch, import, build
+        if: steps.secrets.outputs.ready == 'true'
+        run: python -m healthctx run
+
+      - name: Upload context
+        if: ${{ !cancelled() && steps.secrets.outputs.ready == 'true' }}
+        run: python -m healthctx push-context
+
+      - name: Archive raw data
+        if: ${{ !cancelled() && steps.secrets.outputs.ready == 'true' }}
+        run: python -m healthctx push-raw
