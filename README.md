@@ -73,6 +73,34 @@ Fetch zapisuje każdy element (noc, trening, dzień aktywności) jako osobny pli
 
 Ze scope `drive.file` aplikacja widzi tylko pliki, które sama utworzyła, więc nie ma dostępu do reszty Dysku. Konektor Drive w claude.ai działa na Twoim koncie, więc czyta te pliki normalnie.
 
+## Serwer MCP dla Claude Desktop
+
+`healthctx/mcp_server.py` odpowiada z bazy i plików kontekstu, a nie z surowego API, więc jedno pytanie kosztuje kilkaset tokenów.
+
+| narzędzie | zwraca |
+|---|---|
+| `get_status` | `status.md`, czytane jako pierwsze |
+| `get_day(day)` | plik dnia: noc, wieczór przed snem, treningi |
+| `get_days(date_from, date_to, columns)` | wiersze `daily_metrics` jako CSV, maks. 60 dni, wybrane kolumny |
+| `get_sessions(date_from, date_to)` | treningi jako CSV |
+| `add_journal_entry(...)` | zapis do dziennika i od razu przyrostowy build |
+
+`claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "polar-health": {
+      "command": "C:\\Users\\<user>\\PycharmProjects\\polar-claude-bridge\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "healthctx.mcp_server"],
+      "env": { "PYTHONPATH": "C:\\Users\\<user>\\PycharmProjects\\polar-claude-bridge" }
+    }
+  }
+}
+```
+
+`PYTHONPATH` wskazuje katalog repo. Klucze i `DATABASE_URL` serwer bierze z `.env` w repo, niezależnie od katalogu, z którego uruchamia go Claude Desktop.
+
 ## Pliki kontekstu (`database/private/context/`)
 
 | plik | rozmiar | do czego |

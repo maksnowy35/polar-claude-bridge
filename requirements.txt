@@ -2,6 +2,6 @@
 psycopg[binary]>=3.1     # Postgres (Neon); SQLite needs nothing extra
 python-dotenv>=1.0.0
 
-# Polar API fetcher and the local MCP server in test_files/
+# Polar API fetcher and the MCP servers (healthctx/mcp_server.py, test_files/)
 requests>=2.31.0
-mcp>=1.0.0
+mcp>=2.0          # MCPServer API (FastMCP was renamed in 2.x)
